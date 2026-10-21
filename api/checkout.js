@@ -23,10 +23,22 @@ export async function POST(req) {
   try {
     lock();
     const origin = req.headers.get('origin');
-    const requestOrigin = new URL(req.url).origin;
-    // Require a same-origin browser request AND an explicitly trusted deployment.
-    // Never accept arbitrary *.vercel.app domains or untrusted forwarded headers.
-    if (!origin || origin !== requestOrigin || !trustedOrigins().has(origin)) {
+    // Vercel's internal request URL can differ from the public deployment alias.
+    // Compare the browser Origin with the public Host instead of req.url.
+    const host = req.headers.get('host');
+    let allowed = false;
+    try {
+      const browser = new URL(origin);
+      const isHttps = browser.protocol === 'https:' && browser.origin === origin;
+      const isSameHost = isHttps && browser.host === host;
+      const isConfigured = trustedOrigins().has(origin);
+      // Preview aliases change on redeploy. Permit only HTTPS same-host
+      // requests routed to this Vercel preview deployment.
+      const isVercelPreview = process.env.VERCEL_ENV === 'preview' &&
+        browser.hostname.endsWith('.vercel.app');
+      allowed = isSameHost && (isConfigured || isVercelPreview);
+    } catch { /* Missing or invalid Origin is rejected. */ }
+    if (!allowed) {
       return Response.json({ error: 'Origin rejected' }, { status: 403 });
     }
     const { productId } = await req.json();
