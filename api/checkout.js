@@ -39,7 +39,19 @@ export async function POST(req) {
       allowed = isSameHost && (isConfigured || isVercelPreview);
     } catch { /* Missing or invalid Origin is rejected. */ }
     if (!allowed) {
-      return Response.json({ error: 'Origin rejected' }, { status: 403 });
+      // Safe diagnostics: report comparisons only, never keys, hosts or URLs.
+      const originParsed = (() => { try { return new URL(origin); } catch { return null; } })();
+      const diagnostics = {
+        code: 'ORIGIN_CHECK_FAILED',
+        originPresent: Boolean(origin),
+        originHttps: originParsed?.protocol === 'https:',
+        originMatchesHost: Boolean(originParsed && originParsed.host === host),
+        originTrusted: trustedOrigins().has(origin),
+        previewEnvironment: process.env.VERCEL_ENV === 'preview',
+        vercelPreviewHostname: Boolean(originParsed?.hostname.endsWith('.vercel.app'))
+      };
+      console.warn('Checkout origin validation failed', diagnostics);
+      return Response.json({ error: 'Origin rejected', code: diagnostics.code }, { status: 403 });
     }
     const { productId } = await req.json();
     const product = catalog()[productId];
